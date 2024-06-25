@@ -17,11 +17,13 @@ source \
 # are available
 _requirements() {
   _check_cmd \
+    "dynssh"
+  _check_cmd \
+    "medialength"
+  _check_cmd \
     "mediasplit"
   _check_cmd \
     "rsync"
-  _check_cmd \
-    "dynssh"
 }
 
 # shellcheck disable=SC2034
@@ -29,9 +31,70 @@ _global_variables() {
   out_file=""
   in_file=""
   target_encoders=()
+  chunk_length=""
   parallel_uploads=""
   color=""
   quiet=""
+}
+
+_send_chunk() {
+  local \
+    _in="${1}" \
+    _encoder="${2}" \
+    _chunk="${3}"
+  dynssh 
+}
+
+_send() {
+  local \
+    _in="${1}" \
+    _chunk_length="${2}" \
+    _encoders=() \
+    _pending=() \
+    _chunk=1 \
+    _chunks \
+    _length
+  shift \
+    2
+  _encoders=(
+    "$@"
+    )
+  _length="$( \
+    medialength \
+      "${_in}")"
+  _chunks="$( \
+    echo \
+      "${_length} / ${_chunk_length} + 1" | \
+      bc)"
+  while \
+    (( "${_chunk}" < "${_chunks}" )); do
+    for _u \
+      in "$(seq \
+              "${_uploads})"; do
+      _run \
+        "send_chunk_${_chunk}" \
+        "0" \
+        "async" \
+	  ""
+          "_send_chunk" \
+	    "${_in}" \
+	    "${_chunk}" || \
+        true
+      _pids+=(
+        "$( \
+          _get_pid \
+	    "send_chunk_${_i}")"
+        )
+    done
+    wait \
+      -n \
+      "$( \
+        _get_pid \
+	"encode_${_i}")"
+
+    wait \
+    
+  done
 }
 
 # Remote encade files
@@ -39,21 +102,19 @@ _global_variables() {
 # $2: output file
 # $3: parallel uploads
 # $@: target devices
-_remote_encoder() {
+_remote_encode() {
   local \
     _in="${1}" \
     _out=(
       "${2}"
     ) \
     _uploads="${3}" \
+    _chunk_length="${4}" \
     _vids=() \
-    _opts=() \
-    _overlap \
-    _vidaud \
-    _mute \
+    _send_opts=() \
     _ext
   shift \
-    3
+    4
   _encoders=(
     "$@"
   )
@@ -64,24 +125,14 @@ _remote_encoder() {
   _rsync_opts+=(
     -avz
   )
-  _opts+=(
-    -c:a
-      aac
-    -b:a
-      48k
-    -shortest
-  )
-  if [[ "${_out[*]}" == "" ]] || \
-     [[ "$(_get \
-             "out" \
-	     "stdout")" == "y" ]]; then
-    _out+=(
-      -
-    )
-  fi
-  ffmpeg \
-    "${_opts[@]}" \
-    "${_out[*]}"
+  _run \
+    "send_${_i}" \
+    "0" \
+    "sync" \
+    "_send" \
+      "${_audiorecord_opts[@]}" \
+      "${_audio_file}" || \
+    true
 }
 
 # Set defaults and, if present, overrides
