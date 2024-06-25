@@ -42,7 +42,13 @@ _send_chunk() {
     _in="${1}" \
     _encoder="${2}" \
     _chunk="${3}"
+  available=(
+    "${_available[@]/$_encoder}"
+  )
   dynssh 
+  available+=(
+    "${_encoder}"
+  )
 }
 
 _send() {
@@ -50,7 +56,9 @@ _send() {
     _in="${1}" \
     _chunk_length="${2}" \
     _encoders=() \
-    _pending=() \
+    _available=() \
+    _pid \
+    _pids=() \
     _chunk=1 \
     _chunks \
     _length
@@ -59,6 +67,9 @@ _send() {
   _encoders=(
     "$@"
     )
+  _available=(
+    "${_encoders[@]}"
+  )
   _length="$( \
     medialength \
       "${_in}")"
@@ -67,33 +78,36 @@ _send() {
       "${_length} / ${_chunk_length} + 1" | \
       bc)"
   while \
-    (( "${_chunk}" < "${_chunks}" )); do
-    for _u \
-      in "$(seq \
-              "${_uploads})"; do
-      _run \
-        "send_chunk_${_chunk}" \
-        "0" \
-        "async" \
-	  ""
-          "_send_chunk" \
-	    "${_in}" \
-	    "${_chunk}" || \
-        true
+    (( "${_chunk}" <= "${_chunks}" )) && \
+    (( "${#_pids}" <= "${_uploads}" )); do
+    _run \
+      "send_chunk_${_chunk}" \
+      "0" \
+      "async" \
+      "" \
+      "_send_chunk" \
+        "${_in}" \
+        "${_chunk}" \
+        "${_available[0]}" || \
+      true
       _pids+=(
-        "$( \
-          _get_pid \
-	    "send_chunk_${_i}")"
-        )
-    done
-    wait \
-      -n \
-      "$( \
-        _get_pid \
-	"encode_${_i}")"
-
-    wait \
-    
+        "$(_get_pid \
+	    "send_chunk_${_chunk}")"
+      )
+    _chunk="$(( \
+      _chunk + 1 ))"
+    if [[ "${#_pids}" == "${_uploads}" ]]; then 
+      wait \
+	-f \
+	-p \
+	  _pid
+        -n \
+        "${_pids[@]}"
+      _pids=(
+        "${_pids[@]/$_pid}"
+      )
+      _pid=""
+    fi
   done
 }
 
@@ -130,8 +144,10 @@ _remote_encode() {
     "0" \
     "sync" \
     "_send" \
-      "${_audiorecord_opts[@]}" \
-      "${_audio_file}" || \
+      "${_in}" \
+      "${_chunk_length}" \
+      "${_uploads}" \
+      "${_encoders[@]}" || \
     true
 }
 
