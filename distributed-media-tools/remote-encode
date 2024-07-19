@@ -31,6 +31,7 @@ _requirements() {
 # shellcheck disable=SC2034
 _global_variables() {
   app_opts=()
+  encoding_date=""
   out_file=""
   in_file=""
   target_encoders=()
@@ -48,29 +49,38 @@ _send_chunk() {
   dynssh 
 }
 
-_send() {
+_get_chunks() {
   local \
     _in="${1}" \
     _chunk_length="${2}" \
+    _length
+  _length="$( \
+    medialength \
+      "${_in}")"
+  echo \
+    "${_length} / ${_chunk_length} + 1" | \
+    bc
+}
+
+_send() {
+  local \
+    _in="${1}" \
+    _chunks="${2}" \
     _encoders=() \
     _pending=() \
+    _available=() \
     _chunk=1 \
-    _chunks \
-    _length
+    _finished
   shift \
     2
   _encoders=(
     "$@"
   )
-  _length="$( \
-    medialength \
-      "${_in}")"
-  _chunks="$( \
-    echo \
-      "${_length} / ${_chunk_length} + 1" | \
-      bc)"
+  _available=(
+    "${_encoders[@]}"
+  )
   while \
-    (( "${_chunk}" < "${_chunks}" )); do
+    [ "${_chunk}" -le "${_chunks}" ]; do
     for _u in $(seq "${_uploads}"); do
       _run \
         "send_chunk_${_chunk}" \
@@ -79,22 +89,21 @@ _send() {
 	  ""
           "_send_chunk" \
 	    "${_in}" \
+	    "$()" \
 	    "${_chunk}" || \
         true
       _pids+=(
-        "$( \
-          _get_pid \
-	    "send_chunk_${_i}")"
-        )
+        "$(_get_pid \
+	     "send_chunk_${_i}")"
+      )
     done
     wait \
       -n \
-      "$( \
-        _get_pid \
-	"encode_${_i}")"
-
-    wait \
-    
+      -p \
+        "_cpid"
+      "${_pids[@]}"
+      "$(_get_pid \
+	   "encode_${_i}")"
   done
 }
 
@@ -113,7 +122,8 @@ _remote_encode() {
     _chunk_length="${4}" \
     _vids=() \
     _send_opts=() \
-    _ext
+    _ext \
+    _chunks
   shift \
     4
   _encoders=(
@@ -126,20 +136,32 @@ _remote_encode() {
   _rsync_opts+=(
     -avz
   )
-  _run \
-    "send" \
-    "0" \
-    "sync" \
-    "_send" \
+  _chunks="$( \
+    _get_chunks \
       "${_in}" \
-      "${_chunk_length}" \
-      "${_audio_file}" || \
-    true
+      "${_chunk_length}")"
+  "_send" \
+    "${_in}" \
+    "${_chunks}" \
+    "${_encoders[@]}"
+  # _run \
+  #   "send" \
+  #   "0" \
+  #   "sync" \
+  #   "_send" \
+  #     "${_in}" \
+  #     "${_chunk_length}" \
+  #     "${_encoders[@]}" || \
+  #   true
 }
 
 # Set defaults and, if present, overrides
 # from arch-grub command line option parameters
 _set_overrides() {
+  _set_override \
+    "encoding" \
+    "date" \
+    "$(_get_date_human)"
   if [[ "${target_encoders[*]}" == "" ]]; then
     target_encoders+=(
       "$(hotnamectl)"
@@ -168,7 +190,7 @@ _set_overrides() {
 # Shows configuration options.
 _show_config() {
   _msg_info "${app_name} configuration"
-  _msg_info "              Encode date:   $(_get "encode" "date")"
+  _msg_info "              Encode date:   $(_get "encoding" "date")"
   _msg_info "               Input file:   $(_get "in" "file")"
   _msg_info "              Output file:   $(_get "out" "file")"
   _msg_info "         Parallel uploads:   $(_get "parallel" "uploads")"
@@ -263,7 +285,6 @@ _set \
 _set_overrides
 _config_user_init \
   "distributed-media-tools"
-_ffmpeg_options_load
 app_opts=(
   "$(_get \
        "in" \
@@ -276,5 +297,6 @@ app_opts=(
        "length")"
   "${target_encoders[@]}"
 )
+_show_config
 _remote_encode \
   "${app_opts[@]}"
