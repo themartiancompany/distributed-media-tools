@@ -110,11 +110,11 @@ _send() {
       wait \
 	-f \
 	-p \
-	  _job
+	  _job \
         -n \
         "${_pendings[@]}"
       _pendings=(
-        "${_pendings[@]/$_job}"
+        "${_pendings[@]/${_job}}"
       )
       _job=""
     fi
